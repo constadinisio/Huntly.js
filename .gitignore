@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+build/
+dist/
+
+# Configuration (Sensitive info)
+.env
+config.json
+info.txt
+
+# Data files (Scraper results)
+*.csv
+workana_jobs.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
