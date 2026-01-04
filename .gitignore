@@ -20,3 +20,5 @@ workana_jobs.json
 .idea/
 *.swp
 *.swo
+workana_state.json
+jobs.db
