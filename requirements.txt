@@ -1,4 +1,14 @@
+# Scraper base
 requests
 beautifulsoup4
 rich
 python-dotenv
+
+# Telegram Bot (botones OK/NO)
+python-telegram-bot==21.6
+
+# OpenAI (generación de propuesta)
+openai>=1.0.0
+
+# Envío automático por Chromium
+playwright
