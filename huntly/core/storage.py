@@ -1,10 +1,16 @@
-# storage.py
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "jobs.db"
+from pathlib import Path
+
+# Store DB in repo_root/data/jobs.db by default
+repo_root = Path(__file__).resolve().parents[2]
+DATA_DIR = repo_root / "data"
+DB_PATH = str(DATA_DIR / "jobs.db")
 
 def _c():
+    # ensure data dir exists before connecting
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(DB_PATH)
 
 def init_db():
@@ -28,7 +34,6 @@ def init_db():
         """)
         c.commit()
 
-        # Si venís de una DB vieja, intentamos agregar columnas que falten
         existing_cols = set()
         for row in c.execute("PRAGMA table_info(jobs)"):
             existing_cols.add(row[1])

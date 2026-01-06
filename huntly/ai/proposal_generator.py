@@ -1,8 +1,5 @@
 import os
-from dotenv import load_dotenv
 from openai import OpenAI
-
-load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -53,7 +50,6 @@ Estructura sugerida:
 
     texto = response.choices[0].message.content.strip()
 
-    # 🔒 Seguro anti-placeholders (por si acaso)
     texto = texto.replace("[", "").replace("]", "")
     texto = texto.replace("Tu nombre", "Constantino Di Nisio")
     texto = texto.replace("tu nombre", "Constantino Di Nisio")

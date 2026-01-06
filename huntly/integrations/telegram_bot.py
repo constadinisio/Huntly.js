@@ -1,21 +1,14 @@
-# telegram_bot.py
 import os
 import asyncio
 import html as html_lib
-from dotenv import load_dotenv
-
+ 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 from telegram.constants import ParseMode
 
-from storage import get_job, set_status, set_proposal
-from proposal_generator import generar_propuesta
-from workana_sender import send_proposal_to_workana
-
-# =========================
-# Cargar variables .env
-# =========================
-load_dotenv()
+from ..core.storage import get_job, set_status, set_proposal
+from ..ai.proposal_generator import generar_propuesta
+from ..workana.sender import send_proposal_to_workana
 
 def keyboard_send(job_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
@@ -37,7 +30,6 @@ def build_message_with_proposal(job: dict) -> str:
     desc = html_lib.escape(job.get("description", "") or "")
     proposal = html_lib.escape(job.get("proposal", "") or "")
 
-    # Evitar superar límites de Telegram
     proposal = proposal[:3000]
 
     return (
@@ -52,9 +44,6 @@ def build_message_with_proposal(job: dict) -> str:
         f"<pre><code>{proposal}</code></pre>"
     )
 
-# =========================
-# Callback de botones
-# =========================
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -133,11 +122,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Error al enviar la propuesta.")
         return
 
-# =========================
-# MAIN (thread-safe en Py 3.14)
-# =========================
 def main():
-    # ✅ En threads NO hay loop: lo creamos y seteamos
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -150,7 +135,6 @@ def main():
 
     print("🤖 Bot de Telegram iniciado. Esperando acciones...")
 
-    # ✅ En thread: no registrar señales (stop_signals=None)
     app.run_polling(close_loop=False, stop_signals=None)
 
 if __name__ == "__main__":

@@ -1,7 +1,12 @@
 import asyncio
+import os
+from pathlib import Path
 from playwright.async_api import async_playwright
 
-WORKANA_STATE = "workana_state.json"
+# Allow override via env; default to repo_root/config/workana_state.json
+repo_root = Path(__file__).resolve().parents[2]
+# Support both names used in examples
+WORKANA_STATE = os.getenv("WORKANA_STATE") or os.getenv("WORKANA_STATE_FILE") or str(repo_root / "config" / "workana_state.json")
 LOGIN_URL = "https://www.workana.com/login"
 
 async def main():
@@ -14,8 +19,11 @@ async def main():
         print("Logueate manualmente en Workana y presioná ENTER aquí.")
         input()
 
-        await context.storage_state(path=WORKANA_STATE)
+        # Ensure parent dir exists
+        Path(WORKANA_STATE).parent.mkdir(parents=True, exist_ok=True)
+        await context.storage_state(path=str(WORKANA_STATE))
         await browser.close()
         print("Sesión guardada en", WORKANA_STATE)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

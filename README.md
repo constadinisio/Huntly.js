@@ -1,93 +1,108 @@
 # Workana Job Scraper 🚀
 
 Un scraper robusto y automatizado para extraer ofertas de trabajo de Workana, con notificaciones por Telegram y Email, filtrado por tiempo y modo de monitoreo en tiempo real.
+# Huntly — Workana Job Scraper & Assistant
 
-## ✨ Características
-- **Scraping Inteligente:** Extrae títulos, presupuestos, fechas y enlaces directamente de Workana.
-- **Notificaciones:** Recibe alertas instantáneas en Telegram o por Email cuando aparece un nuevo trabajo.
-- **Modo Watch:** Mantén el scraper corriendo 24/7 para no perderte ninguna oportunidad.
-- **Filtrado por Tiempo:** Filtra trabajos muy antiguos para enfocarte solo en lo reciente.
-- **Persistencia:** Guarda los resultados en archivos CSV y JSON para su análisis posterior.
+Un scraper y pipeline para detectar ofertas en Workana, generar propuestas y enviar notificaciones (Telegram / Email). Este repositorio fue reorganizado en paquetes para facilitar extensión y despliegue.
 
----
+**Resumen rápido:**
+- Scrapea ofertas desde Workana.
+- Persiste resultados en `data/` (CSV, JSON y SQLite).
+- Integra generación de propuestas (AI) y envío automatizado.
+- Notificaciones por Telegram y (opcional) Email.
 
-## 🛠️ Instalación
+**Estructura principal del repo**
+- **`huntly/`**: paquete principal con submódulos:
+  - `huntly/core` — almacenamiento, notificaciones y utilidades.
+  - `huntly/workana` — scraper, sender (playwright) y bootstrap de sesión.
+  - `huntly/integrations` — integraciones (Telegram bot).
+  - `huntly/pipeline` — pipeline de propuestas y procesamiento.
+  - `huntly/ai` — generación de propuestas (OpenAI u otra API).
+- **`config/`**: archivos de configuración y ejemplo de entorno.
+- **`data/`**: datos generados y persistencia (`workana_jobs.csv`, `workana_jobs.json`, `jobs.db`).
 
-1. **Clonar el repositorio** (o descargar los archivos):
-   ```bash
-   git clone <url-del-repo>
-   cd workana_scrapper
-   ```
-
-2. **Crear y activar un entorno virtual** (Recomendado):
-   ```bash
-   python -m venv .venv
-   # En Windows:
-   .venv\Scripts\activate
-   # En Mac/Linux:
-   source .venv/bin/activate
-   ```
-
-3. **Instalar dependencias:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+**Archivos importantes**: [config/.env.example](config/.env.example), [main.py](main.py), [data/workana_jobs.csv](data/workana_jobs.csv), [data/workana_jobs.json](data/workana_jobs.json), [data/jobs.db](data/jobs.db)
 
 ---
 
-## ⚙️ Configuración (.env)
+**Requisitos recomendados**
+- Python 3.11 o 3.12 (probado). Algunas dependencias como Playwright pueden requerir herramientas de sistema.
+- Instala dependencias desde `requirements.txt`.
 
-El sistema utiliza un archivo `.env` para manejar la configuración de forma segura. 
-
-1. Copia el archivo de ejemplo:
-   ```bash
-   cp .env.example .env
-   ```
-2. Abre el archivo `.env` y completa tus datos:
-
-| Variable | Descripción | Ejemplo |
-|----------|-------------|---------|
-| `URL` | URL de Workana con tus filtros de búsqueda | `https://www.workana.com/jobs?skills=python` |
-| `MAX_AGE_HOURS` | Solo procesar trabajos de las últimas X horas | `3.0` |
-| `NOTIFY_TELEGRAM` | Activar/Desactivar Telegram | `true` |
-| `TG_TOKEN` | Token de tu bot de Telegram | `123456:ABC-DEF...` |
-| `TG_CHAT` | ID de tu chat o grupo | `6461819551` |
-| `NOTIFY_EMAIL` | Activar/Desactivar Email | `false` |
-| `WATCH_MODE` | Ejecutar continuamente | `true` |
-| `INTERVAL_MINUTES` | Minutos entre chequeos en modo Watch | `10` |
-
-### 🤖 Cómo crear tu Bot de Telegram
-1. Busca a `@BotFather` en Telegram y envíale `/newbot`.
-2. Sigue los pasos para obtener tu `TG_TOKEN`.
-3. Para obtener tu `TG_CHAT` ID, puedes usar el bot `@userinfobot` o enviarle un mensaje a tu nuevo bot y revisar la URL: `https://api.telegram.org/bot<TU_TOKEN>/getUpdates`.
-
----
-
-## 🚀 Uso
-
-### Ejecución Única
+Instalación y entorno
 ```bash
-python workana_scraper.py
+python -m venv .venv
+.venv\\Scripts\\activate    # Windows (PowerShell/CMD)
+pip install -r requirements.txt
 ```
 
-### Modo Monitoreo (Watch Mode)
-Puedes activarlo en el `.env` (`WATCH_MODE=true`) o por consola:
-```bash
-python workana_scraper.py --watch --interval 15
+Configuración inicial
+ - Copia el ejemplo de entorno y edítalo:
+```powershell
+copy config\\.env.example config\\.env   # Windows
+```
+ - Valores importantes (en `config/.env`):
+   - `WORKANA_URL`: URL de búsqueda en Workana.
+   - `WORKANA_STATE_FILE`: archivo para Playwright storage state (por defecto `config/workana_state.json`).
+   - `CSV_FILE` / `JSON_FILE`: si solo das un nombre se guardará en `data/`.
+   - `TG_TOKEN`, `TG_CHAT`: para notificaciones por Telegram.
+   - `OPENAI_API_KEY` (opcional): para generación automática de propuestas.
+
+Inicio por primera vez
+1. Guardar sesión de Playwright (solo si usas envío automático):
+
+```powershell
+python -m huntly.workana.bootstrap
+# Sigue las instrucciones en la ventana del navegador para iniciar sesión en Workana
 ```
 
-### Probar Telegram
-Verifica que tu configuración de Telegram sea correcta:
-```bash
-python test_telegram.py
+El bootstrap guardará `WORKANA_STATE_FILE` (por defecto `config/workana_state.json`).
+
+2. Ejecutar la aplicación principal (bot + scraper):
+
+```powershell
+python main.py
 ```
+
+`main.py` arranca el bot de Telegram en un hilo y ejecuta el scraper/pipeline en primer plano.
+
+Modo desarrollo y pruebas
+ - Ejecutar solo el scraper:
+```bash
+python -m huntly.workana.scraper
+```
+ - Ejecutar solo el bot (útil para desarrollo):
+```bash
+python -m huntly.integrations.telegram_bot
+```
+
+Persistencia y archivos generados
+- Todos los archivos generados por defecto se almacenan en la carpeta `data/`:
+  - `data/workana_jobs.csv` — CSV principal.
+  - `data/workana_jobs.json` — respaldo JSON.
+  - `data/jobs.db` — SQLite para estados y metadatos.
+
+Si prefieres otra ruta, configura las variables `CSV_FILE`, `JSON_FILE` o `DB_FILE` en `config/.env`.
+
+Notas operativas
+- `config/.env` se carga desde `huntly/__init__.py`; no subas credenciales al control de versiones.
+- Evitamos ejecutar efectos secundarios en import time; los scripts tienen `if __name__ == '__main__'` o se ejecutan con `-m`.
+- Si mueves o renuevas la sesión de Playwright, actualiza `WORKANA_STATE_FILE`.
+
+Depuración
+- Logs se imprimen en consola; para más detalle ajusta el nivel de logging en `config/.env` o dentro de `huntly/core`.
+
+Contribuir
+- Si quieres colaborar: abre un issue con la propuesta o un PR siguiendo el estilo del repositorio.
+
+Licencia
+- Revisa el archivo `LICENSE` en la raíz.
+
+Contacto
+- Mantenedor: @constadinisio
 
 ---
 
-## 📄 Archivos Generados
-- `workana_jobs.csv`: Base de datos principal de trabajos encontrados.
-- `workana_jobs.json`: Respaldo en formato JSON.
-- `.env`: Tu configuración personal (¡No subir a GitHub!).
-
----
-*Desarrollado por [@constadinisio](https://github.com/constadinisio)*
+Si quieres, puedo:
+- Añadir una sección de ejemplo de `config/.env` con todos los valores por defecto.
+- Añadir un script `make`/`ps1` para inicializar el entorno y bootstrap automático.

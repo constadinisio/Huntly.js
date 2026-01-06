@@ -1,13 +1,4 @@
-# workana_scraper.py
-"""
-Workana Scraper (v1) + Pipeline Telegram (botones)
-
-Reglas:
-- Telegram: SOLO desde proposal_pipeline.handle_new_job(job)
-- notifications.py: SOLO EMAIL (si NOTIFY_EMAIL=true)
-- WATCH_MODE desde .env mantiene el proceso corriendo
-"""
-
+"""Workana scraper (moved into huntly.workana)."""
 import csv
 import json
 import random
@@ -20,10 +11,8 @@ from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
-
-import notifications
-from proposal_pipeline import handle_new_job
+from ..core import notifications
+from ..pipeline.proposal_pipeline import handle_new_job
 
 # Rich UI
 from rich.console import Console
@@ -31,9 +20,6 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.status import Status
 from rich import box
-
-# Load env
-load_dotenv()
 
 console = Console()
 
@@ -54,8 +40,11 @@ DELAY_MIN = 3
 DELAY_MAX = 7
 
 # Default output files (can be overridden by env)
-CSV_OUTPUT_DEFAULT = Path("workana_jobs.csv")
-JSON_OUTPUT_DEFAULT = Path("workana_jobs.json")
+# Place outputs inside repo_root/data by default
+repo_root = Path(__file__).resolve().parents[2]
+DATA_DIR = repo_root / "data"
+CSV_OUTPUT_DEFAULT = DATA_DIR / "workana_jobs.csv"
+JSON_OUTPUT_DEFAULT = DATA_DIR / "workana_jobs.json"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -148,7 +137,6 @@ def parse_jobs(html: str) -> List[Dict[str, str]]:
             slug = item.get("slug")
             link = f"https://www.workana.com/job/{slug}" if slug else None
 
-        # ✅ URL válida
         if not link or not str(link).startswith("http"):
             continue
 
@@ -225,7 +213,6 @@ def scrape(
                 new_jobs.append(job)
                 seen_urls.add(job_url)
 
-            # ✅ guardar nuevos en el acumulado (persistencia)
             all_jobs.extend(new_jobs)
 
             if filtered_by_age > 0 and max_age_hours is not None:
@@ -243,13 +230,11 @@ def scrape(
                 table.add_column("Fecha", style="dim")
 
                 for job in new_jobs:
-                    # ✅ Telegram pipeline (botones) 1 sola vez
                     handle_new_job(job)
                     table.add_row(job["title"], job["budget"], job["date"])
 
                 console.print(table)
 
-                # ✅ Email opcional (solo si notify_email)
                 if notify_config and notify_config.get("notify_email"):
                     for job in new_jobs:
                         msg = (
@@ -270,7 +255,6 @@ def scrape(
             if max_pages and page > max_pages:
                 break
 
-    # Persistencia CSV/JSON
     if all_jobs:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         file_exists = csv_path.exists()
@@ -310,7 +294,6 @@ def scrape(
             title="Resultados"
         ))
 
-        # ✅ Solo email (si está activo). Telegram lo maneja proposal_pipeline.
         if notify_config and notify_config.get("notify_email"):
             notifications.notify(
                 "🏁 Ciclo de Scraping Finalizado",
@@ -320,18 +303,24 @@ def scrape(
 
     return all_jobs
 
-# ---------------------------------------------------------------------------
-# Entry point (WATCH_MODE from .env)
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    # Config desde env
     target_url = (os.getenv("URL") or DEFAULT_URL).strip()
 
-    csv_file = (os.getenv("CSV_FILE") or str(CSV_OUTPUT_DEFAULT)).strip()
-    json_file = (os.getenv("JSON_FILE") or str(JSON_OUTPUT_DEFAULT)).strip()
-    csv_path = Path(csv_file)
-    json_path = Path(json_file) if json_file else None
+    # Respect env vars but resolve simple filenames into the data directory
+    csv_env = os.getenv("CSV_FILE")
+    json_env = os.getenv("JSON_FILE")
+
+    def resolve_output(p: str, default: Path) -> Path:
+        if not p:
+            return default
+        pth = Path(p)
+        # If user provided only a filename (no parent), place it under DATA_DIR
+        if not pth.parent or str(pth.parent) in (".", ""):
+            return DATA_DIR / pth.name
+        return pth
+
+    csv_path = resolve_output(csv_env, CSV_OUTPUT_DEFAULT)
+    json_path = resolve_output(json_env, JSON_OUTPUT_DEFAULT) if (json_env or JSON_OUTPUT_DEFAULT) else None
 
     max_pages_str = (os.getenv("MAX_PAGES") or "").strip()
     max_pages = int(max_pages_str) if max_pages_str.isdigit() else None
