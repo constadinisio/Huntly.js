@@ -1,0 +1,472 @@
+param(
+    [string]$RepoUrl = 'https://github.com/constadinisio/Huntly.js.git',
+    [string]$InstallDir = (Join-Path $env:USERPROFILE 'Huntly.js'),
+    [switch]$Force,
+    [switch]$SkipBootstrap,
+    [switch]$NonInteractive,
+    [string]$TGToken,
+    [string]$TGChat,
+    [string]$OpenAIKey
+)
+
+function Info($m){ Write-Host "[INFO] $m" -ForegroundColor Cyan }
+function Ok($m){ Write-Host "[OK]   $m" -ForegroundColor Green }
+function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
+function Err($m){ Write-Host "[ERROR] $m" -ForegroundColor Red }
+
+Set-StrictMode -Version Latest
+
+try {
+    $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+    $possibleRepoRoot = Resolve-Path -LiteralPath (Join-Path $scriptDir '..') -ErrorAction SilentlyContinue
+    if (-not $possibleRepoRoot) { $possibleRepoRoot = Get-Location }
+    $possibleRepoRoot = $possibleRepoRoot.Path
+
+    if (Test-Path (Join-Path $possibleRepoRoot 'huntly')) {
+        Info "Running inside repo at $possibleRepoRoot"
+        $repoRoot = $possibleRepoRoot
+    } else {
+        if ((Test-Path $InstallDir) -and $Force) { Remove-Item -Recurse -Force -Path $InstallDir; Info "Removed existing $InstallDir" }
+        if (-not (Test-Path $InstallDir)) {
+            $git = Get-Command git -ErrorAction SilentlyContinue
+            if ($git) {
+                Info "Cloning $RepoUrl -> $InstallDir"
+                git clone $RepoUrl $InstallDir
+            } else {
+                Info "Git not available: downloading zip"
+                $base = $RepoUrl -replace '\.git$',''
+                $zipUrl = "$base/archive/refs/heads/main.zip"
+                $tmp = Join-Path $env:TEMP 'huntly-main.zip'
+                Invoke-WebRequest -Uri $zipUrl -OutFile $tmp -UseBasicParsing
+                $extractDir = Join-Path $env:TEMP 'huntly_extracted'
+                if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+                New-Item -ItemType Directory -Path $extractDir | Out-Null
+                Expand-Archive -Path $tmp -DestinationPath $extractDir -Force
+                Remove-Item $tmp -Force
+                $children = Get-ChildItem -Path $extractDir | Where-Object { $_.PSIsContainer }
+                if ($children.Count -eq 1) { Move-Item -Path $children[0].FullName -Destination $InstallDir } else { Move-Item -Path (Join-Path $extractDir '*') -Destination $InstallDir }
+                Remove-Item -Recurse -Force $extractDir
+            }
+            Ok "Repository ready at $InstallDir"
+        } else { Info "Using existing folder $InstallDir" }
+        $repoRoot = (Resolve-Path $InstallDir).Path
+    }
+
+    Push-Location $repoRoot
+
+    # Ensure config/.env exists
+    if (-not (Test-Path 'config')) { New-Item -ItemType Directory -Path config | Out-Null }
+    if (-not (Test-Path 'config\.env')) {
+        if (Test-Path 'config\.env.example') { Copy-Item 'config\.env.example' 'config\.env'; Ok 'Created config/.env from example' } else { Warn 'config/.env.example not found; please create config/.env' }
+    } else { Info 'config/.env already exists' }
+
+    # Read WORKANA_STATE_FILE if present
+    $stateFile = 'config\workana_state.json'
+    if (Test-Path 'config\.env') {
+        $envLines = Get-Content 'config\.env'
+        foreach ($l in $envLines) {
+            if ($l -match '^\s*WORKANA_STATE_FILE\s*=\s*(.+)\s*$') {
+                $val = $matches[1].Trim()
+                $val = $val.Trim("'\"")
+                if ($val -ne '') { $stateFile = $val }
+                break
+            }
+        }
+    }
+    Info "WORKANA_STATE_FILE: $stateFile"
+
+    # Minimal python handling: create venv only if python is available
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if ($py) {
+        if (-not (Test-Path '.venv')) { Info 'Creating virtualenv .venv'; python -m venv .venv; Ok 'Virtualenv created' } else { Info '.venv already exists' }
+    } else {
+        Warn 'Python not found in PATH. Skipping venv creation and package installs.'
+    }
+
+    # Update config/.env with provided tokens
+    function Set-EnvValue($key, $value) {
+        if (-not $value) { return }
+        $envPath = Join-Path (Get-Location) 'config\.env'
+        if (-not (Test-Path $envPath)) { New-Item -ItemType File -Path $envPath -Force | Out-Null }
+        $content = Get-Content $envPath -Raw
+        $pattern = "(?m)^\s*" + [regex]::Escape($key) + "\s*=.*$"
+        if ($content -match $pattern) { $new = [regex]::Replace($content, $pattern, "$key=$value") } else { $new = $content.TrimEnd() + [Environment]::NewLine + "$key=$value" + [Environment]::NewLine }
+        Set-Content -Path $envPath -Value $new -Force
+        Info "Updated $key in config/.env"
+    }
+
+    if ($TGToken) { Set-EnvValue 'TG_TOKEN' $TGToken }
+    if ($TGChat)  { Set-EnvValue 'TG_CHAT' $TGChat }
+    if ($OpenAIKey) { Set-EnvValue 'OPENAI_API_KEY' $OpenAIKey }
+
+    Pop-Location
+    Ok 'Setup finished successfully.'
+
+} catch {
+    Err "Error in setup_and_run: $_"
+    exit 1
+}
+<#
+Minimal, syntactically-clean installer for Windows.
+
+This version focuses on cloning/downloading the repo, creating `config/.env`
+from the example if missing, and (if Python is present) creating a `.venv`.
+It avoids in-script installers and long external downloads to keep testing quick.
+#>
+
+param(
+    [string]$RepoUrl = 'https://github.com/constadinisio/Huntly.js.git',
+    [string]$InstallDir = (Join-Path $env:USERPROFILE 'Huntly.js'),
+    [switch]$Force,
+    [switch]$SkipBootstrap,
+    [switch]$NonInteractive,
+    [string]$TGToken,
+    [string]$TGChat,
+    [string]$OpenAIKey
+)
+
+function Info($m){ Write-Host "[INFO] $m" -ForegroundColor Cyan }
+function Ok($m){ Write-Host "[OK]   $m" -ForegroundColor Green }
+function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
+function Err($m){ Write-Host "[ERROR] $m" -ForegroundColor Red }
+
+Set-StrictMode -Version Latest
+
+try {
+    $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+    $possibleRepoRoot = Resolve-Path -LiteralPath (Join-Path $scriptDir '..') -ErrorAction SilentlyContinue
+    if (-not $possibleRepoRoot) { $possibleRepoRoot = Get-Location }
+    $possibleRepoRoot = $possibleRepoRoot.Path
+
+    if (Test-Path (Join-Path $possibleRepoRoot 'huntly')) {
+        Info "Running inside repo at $possibleRepoRoot"
+        $repoRoot = $possibleRepoRoot
+    } else {
+        if ((Test-Path $InstallDir) -and $Force) { Remove-Item -Recurse -Force -Path $InstallDir; Info "Removed existing $InstallDir" }
+        if (-not (Test-Path $InstallDir)) {
+            $git = Get-Command git -ErrorAction SilentlyContinue
+            if ($git) {
+                Info "Cloning $RepoUrl -> $InstallDir"
+                git clone $RepoUrl $InstallDir
+            } else {
+                Info "Git not available: downloading zip"
+                $base = $RepoUrl -replace '\.git$',''
+                $zipUrl = "$base/archive/refs/heads/main.zip"
+                $tmp = Join-Path $env:TEMP 'huntly-main.zip'
+                Invoke-WebRequest -Uri $zipUrl -OutFile $tmp -UseBasicParsing
+                $extractDir = Join-Path $env:TEMP 'huntly_extracted'
+                if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+                New-Item -ItemType Directory -Path $extractDir | Out-Null
+                Expand-Archive -Path $tmp -DestinationPath $extractDir -Force
+                Remove-Item $tmp -Force
+                $children = Get-ChildItem -Path $extractDir | Where-Object { $_.PSIsContainer }
+                if ($children.Count -eq 1) { Move-Item -Path $children[0].FullName -Destination $InstallDir } else { Move-Item -Path (Join-Path $extractDir '*') -Destination $InstallDir }
+                Remove-Item -Recurse -Force $extractDir
+            }
+            Ok "Repository ready at $InstallDir"
+        } else { Info "Using existing folder $InstallDir" }
+        $repoRoot = (Resolve-Path $InstallDir).Path
+    }
+
+    Push-Location $repoRoot
+
+    # Ensure config/.env exists
+    if (-not (Test-Path 'config')) { New-Item -ItemType Directory -Path config | Out-Null }
+    if (-not (Test-Path 'config\.env')) {
+        if (Test-Path 'config\.env.example') { Copy-Item 'config\.env.example' 'config\.env'; Ok 'Created config/.env from example' } else { Warn 'config/.env.example not found; please create config/.env' }
+    } else { Info 'config/.env already exists' }
+
+    # Read WORKANA_STATE_FILE if present
+    $stateFile = 'config\workana_state.json'
+    if (Test-Path 'config\.env') {
+        $envLines = Get-Content 'config\.env'
+        foreach ($l in $envLines) {
+            if ($l -match '^\s*WORKANA_STATE_FILE\s*=\s*(.+)\s*$') {
+                $val = $matches[1].Trim()
+                $val = $val.Trim("'\"")
+                if ($val -ne '') { $stateFile = $val }
+                break
+            }
+        }
+    }
+    Info "WORKANA_STATE_FILE: $stateFile"
+
+    # Minimal python handling: create venv only if python is available
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if ($py) {
+        if (-not (Test-Path '.venv')) { Info 'Creating virtualenv .venv'; python -m venv .venv; Ok 'Virtualenv created' } else { Info '.venv already exists' }
+    } else {
+        Warn 'Python not found in PATH. Skipping venv creation and package installs.'
+    }
+
+    # Update config/.env with provided tokens
+    function Set-EnvValue($key, $value) {
+        if (-not $value) { return }
+        $envPath = Join-Path (Get-Location) 'config\.env'
+        if (-not (Test-Path $envPath)) { New-Item -ItemType File -Path $envPath -Force | Out-Null }
+        $content = Get-Content $envPath -Raw
+        $pattern = "(?m)^\s*" + [regex]::Escape($key) + "\s*=.*$"
+        if ($content -match $pattern) { $new = [regex]::Replace($content, $pattern, "$key=$value") } else { $new = $content.TrimEnd() + [Environment]::NewLine + "$key=$value" + [Environment]::NewLine }
+        Set-Content -Path $envPath -Value $new -Force
+        Info "Updated $key in config/.env"
+    }
+
+    if ($TGToken) { Set-EnvValue 'TG_TOKEN' $TGToken }
+    if ($TGChat)  { Set-EnvValue 'TG_CHAT' $TGChat }
+    if ($OpenAIKey) { Set-EnvValue 'OPENAI_API_KEY' $OpenAIKey }
+
+    Pop-Location
+    Ok 'Setup finished successfully.'
+
+} catch {
+    Err "Error in setup_and_run: $_"
+    exit 1
+}
+
+}
+<#
+Unified installer and runner for Windows (PowerShell).
+
+This single script does everything an end-user needs:
+- Optionally download/clone the repo to a target folder
+- Install Python (if missing), create a virtualenv and install requirements
+- Install Playwright browsers
+- Copy `config/.env.example` to `config/.env` if missing
+- Optionally run the Playwright bootstrap to save session (workana_state)
+- Run `python main.py` at the end
+
+Usage examples:
+  # If already inside the repo, run directly:
+  .\scripts\setup_and_run.ps1
+
+  # From anywhere, clone and run:
+  .\scripts\setup_and_run.ps1 -RepoUrl 'https://github.com/constadinisio/Huntly.js.git' -InstallDir "$env:USERPROFILE\Huntly.js"
+
+Options:
+  -RepoUrl     URL to clone (defaults to repo origin).
+  -InstallDir  Where to place the repo if cloning. Defaults to $env:USERPROFILE\Huntly.js
+  -Force       Overwrite InstallDir if exists
+  -SkipBootstrap  Skip interactive Playwright bootstrap step
+#>
+
+param(
+    [string]$RepoUrl = 'https://github.com/constadinisio/Huntly.js.git',
+    [string]$InstallDir = (Join-Path $env:USERPROFILE 'Huntly.js'),
+    [switch]$Force,
+    [switch]$SkipBootstrap,
+    [switch]$NonInteractive,
+    [string]$TGToken,
+    [string]$TGChat,
+    [string]$OpenAIKey
+)
+
+function Info($m){ Write-Host "[INFO] $m" -ForegroundColor Cyan }
+function Ok($m){ Write-Host "[OK]   $m" -ForegroundColor Green }
+function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
+function Err($m){ Write-Host "[ERROR] $m" -ForegroundColor Red }
+
+Set-StrictMode -Version Latest
+
+try {
+    $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+    $repoRoot = Resolve-Path -LiteralPath (Join-Path $scriptDir '..')
+    $insideRepo = Test-Path (Join-Path $repoRoot 'huntly')
+
+    if (-not $insideRepo) {
+        # Need to clone or download
+        if (Test-Path $InstallDir) {
+            if ($Force) {
+                Info "Eliminando carpeta existente $InstallDir (por -Force)"
+                Remove-Item -Recurse -Force -Path $InstallDir
+            } else {
+                Info "Carpeta $InstallDir ya existe. Usando carpeta existente."
+            }
+        }
+
+        if (-not (Test-Path $InstallDir)) {
+            $git = Get-Command git -ErrorAction SilentlyContinue
+            if ($git) {
+                Info "Clonando $RepoUrl -> $InstallDir"
+                git clone $RepoUrl $InstallDir
+            } else {
+                Info "Git no disponible. Descargando ZIP desde GitHub..."
+                $base = $RepoUrl -replace '\.git$',''
+                $zipUrl = "$base/archive/refs/heads/main.zip"
+                $tmp = Join-Path $env:TEMP "repo-main.zip"
+                Invoke-WebRequest -Uri $zipUrl -OutFile $tmp -UseBasicParsing
+                $extractDir = Join-Path $env:TEMP "huntly_repo_extracted"
+                if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+                New-Item -ItemType Directory -Path $extractDir | Out-Null
+                Expand-Archive -Path $tmp -DestinationPath $extractDir -Force
+                Remove-Item $tmp -Force
+                $children = Get-ChildItem -Path $extractDir | Where-Object { $_.PSIsContainer }
+                if ($children.Count -eq 1) {
+                    Move-Item -Path $children[0].FullName -Destination $InstallDir
+                } else {
+                    Move-Item -Path (Join-Path $extractDir '*') -Destination $InstallDir
+                }
+                Remove-Item -Recurse -Force $extractDir
+            }
+            Ok "Código descargado en $InstallDir"
+        }
+
+        # set repoRoot to install dir
+        $repoRoot = Resolve-Path $InstallDir
+    } else {
+        $repoRoot = Resolve-Path $repoRoot
+        Info "Ejecutando dentro del repo en $repoRoot"
+    }
+
+    Push-Location $repoRoot
+
+    # Check for python, install if missing
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) {
+        Warn "Python no encontrado en PATH. Intentando instalar Python 3.11 (silencioso)..."
+        $pythonUrl = 'https://www.python.org/ftp/python/3.11.4/python-3.11.4-amd64.exe'
+        $tmp = Join-Path $env:TEMP "python-installer.exe"
+        Invoke-WebRequest -Uri $pythonUrl -OutFile $tmp -UseBasicParsing
+        $args = '/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1'
+        $proc = Start-Process -FilePath $tmp -ArgumentList $args -Wait -PassThru -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ExitCode -ne 0) {
+            Warn "Instalación global falló (code $($proc.ExitCode)) — intentando instalación por usuario actual..."
+            $args2 = '/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1'
+            Start-Process -FilePath $tmp -ArgumentList $args2 -Wait -PassThru
+        }
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        # Reload PATH
+        $machinePath = [System.Environment]::GetEnvironmentVariable('Path','Machine')
+        $userPath = [System.Environment]::GetEnvironmentVariable('Path','User')
+        $env:Path = ($machinePath + ';' + $userPath).TrimEnd(';')
+        $py = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $py) {
+            Err "No se pudo localizar 'python' tras la instalación. Reinicia la consola y vuelve a ejecutar este script."
+            Pop-Location
+            exit 1
+        }
+        Ok "Python instalado: $(python --version)"
+    } else {
+        Info "Python disponible: $(python --version)"
+    }
+
+    # Create venv if missing
+    if (-not (Test-Path '.venv')) {
+        Info "Creando virtualenv .venv"
+        python -m venv .venv
+        Ok "Virtualenv creado"
+    } else {
+        Info "Virtualenv .venv ya existe"
+    }
+
+    # Activate venv in this session
+    $activate = Join-Path (Resolve-Path .venv).Path 'Scripts\Activate.ps1'
+    if (Test-Path $activate) {
+        Info "Activando virtualenv..."
+        & $activate
+    } else {
+        Warn "No se encontró el script de activación en .venv\Scripts\Activate.ps1"
+    }
+
+    # Install dependencies
+    if (Test-Path 'requirements.txt') {
+        Info "Instalando dependencias desde requirements.txt"
+        pip install -r requirements.txt
+    } else {
+        Warn "No se encontró requirements.txt"
+    }
+
+    # Install Playwright browsers
+    Info "Instalando navegadores Playwright"
+    try {
+        python -m playwright install
+        Ok "Playwright browsers instalados"
+    } catch {
+        Warn "Error instalando Playwright: $_"
+    }
+
+    # Ensure config/.env exists
+    if (-not (Test-Path 'config')) { New-Item -ItemType Directory -Path config | Out-Null }
+    if (-not (Test-Path 'config\\.env')) {
+        if (Test-Path 'config\\.env.example') {
+            Copy-Item 'config\\.env.example' 'config\\.env'
+            Ok "Se creó config/.env desde config/.env.example"
+        } else {
+            Warn "No existe config/.env.example; crea config/.env manualmente"
+        }
+    } else { Info "config/.env ya existe" }
+
+    # Determine WORKANA_STATE_FILE path from config/.env if present
+    $defaultState = 'config\workana_state.json'
+    $stateFile = $defaultState
+    if (Test-Path 'config\\.env') {
+        $envLines = Get-Content 'config\\.env'
+        foreach ($l in $envLines) {
+            if ($l -match '^\s*WORKANA_STATE_FILE\s*=\s*(.+)\s*$') {
+                $val = $matches[1].Trim()
+                $val = $val.Trim("'\"")
+                if ($val -ne '') { $stateFile = $val }
+                break
+            }
+        }
+    }
+
+    Info "WORKANA_STATE_FILE esperado: $stateFile"
+
+    if ($NonInteractive) { Info "Modo non-interactive habilitado: no se pedirá confirmación." }
+
+    $shouldRunBootstrap = $false
+    if ($SkipBootstrap) {
+        Info "-SkipBootstrap especificado: omitido bootstrap Playwright"
+    } elseif ($NonInteractive) {
+        $shouldRunBootstrap = $true
+    } else {
+        $runBoot = Read-Host "¿Ejecutar ahora el bootstrap de Playwright para iniciar sesión en Workana y guardar $stateFile? (y/N)"
+        if ($runBoot -and $runBoot.Substring(0,1).ToLower() -eq 'y') { $shouldRunBootstrap = $true }
+    }
+
+    if ($shouldRunBootstrap) {
+        Info "Ejecutando python -m huntly.workana.bootstrap"
+        try { & python -m huntly.workana.bootstrap } catch { Warn "Bootstrap fallo: $_" }
+        if (Test-Path $stateFile) { Ok "WORKANA_STATE_FILE guardado: $stateFile" } else { Warn "No se encontró $stateFile después del bootstrap" }
+    } else { Info "Omitido bootstrap Playwright" }
+
+    # Final step: run main.py
+    # If user supplied TG/OpenAI values, write/update them into config/.env
+    function Set-EnvValue($key, $value) {
+        if (-not $value) { return }
+        $envPath = Join-Path (Get-Location) 'config\.env'
+        if (-not (Test-Path $envPath)) { New-Item -ItemType File -Path $envPath -Force | Out-Null }
+        $content = Get-Content $envPath -Raw
+        $pattern = "(?m)^\s*" + [regex]::Escape($key) + "\s*=.*$"
+        if ($content -match $pattern) {
+            $new = [regex]::Replace($content, $pattern, "$key=$value")
+        } else {
+            $new = $content.TrimEnd() + [Environment]::NewLine + "$key=$value" + [Environment]::NewLine
+        }
+        Set-Content -Path $envPath -Value $new -Force
+        Info "Actualizado $key en config/.env"
+    }
+
+    if ($TGToken) { Set-EnvValue -key 'TG_TOKEN' -value $TGToken }
+    if ($TGChat)  { Set-EnvValue -key 'TG_CHAT'  -value $TGChat }
+    if ($OpenAIKey) { Set-EnvValue -key 'OPENAI_API_KEY' -value $OpenAIKey }
+
+    if ($NonInteractive) {
+        Info "Non-interactive: ejecutando main.py sin confirmación"
+        try { & python main.py } catch { Err "Ejecución de main falló: $_" }
+    } else {
+        $runNow = Read-Host 'Deseas ejecutar ahora la aplicacion "python main.py"? (y/N)'
+        if ($runNow -and $runNow.Substring(0,1).ToLower() -eq 'y') {
+            Info "Ejecutando main.py"
+            try { & python main.py } catch { Err "Ejecución de main falló: $_" }
+        } else { Info 'Instalacion completa. Ejecuta "python main.py" cuando quieras.' }
+    }
+
+    Pop-Location
+
+    Ok "Proceso terminado."
+
+} catch {
+    Err "Error en setup_and_run: $_"
+    exit 1
+}

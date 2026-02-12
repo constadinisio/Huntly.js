@@ -4,6 +4,7 @@ Starts the Telegram bot in a background thread and runs the scraper in foregroun
 """
 import threading
 import runpy
+from huntly.core.validation import validate_config, sanity_check
 
 
 def run_telegram_bot():
@@ -15,6 +16,10 @@ def run_scraper():
 
 
 if __name__ == "__main__":
+    # Validate configuration before starting services
+    validate_config()
+    sanity_check()
+
     t = threading.Thread(target=run_telegram_bot, daemon=True)
     t.start()
 

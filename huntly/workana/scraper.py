@@ -182,6 +182,9 @@ def scrape(
     all_jobs: List[Dict[str, str]] = []
 
     page = 1
+    consecutive_empty_pages = 0  # Track pages with no new jobs
+    max_consecutive_empty = 3    # Stop after N consecutive empty pages
+    
     with Status("[bold blue]Iniciando scraping...", console=console) as status:
         while True:
             url = build_page_url(start_url, page)
@@ -217,6 +220,17 @@ def scrape(
 
             if filtered_by_age > 0 and max_age_hours is not None:
                 console.print(f"[dim]Página {page}: {filtered_by_age} trabajos omitidos por ser más antiguos de {max_age_hours} horas.[/dim]")
+
+            # Early exit: if this page has no new jobs, increment counter
+            if not new_jobs:
+                consecutive_empty_pages += 1
+                # If we have max_age_hours filter and all jobs were filtered by age, likely older pages will be too
+                if max_age_hours is not None and filtered_by_age > 0 and consecutive_empty_pages >= max_consecutive_empty:
+                    console.print(f"[yellow][INFO][/yellow] Se encontraron {consecutive_empty_pages} páginas consecutivas sin trabajos nuevos. Deteniendo búsqueda.")
+                    break
+            else:
+                # Reset counter when we find new jobs
+                consecutive_empty_pages = 0
 
             if new_jobs:
                 table = Table(
