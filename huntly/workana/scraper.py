@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Set
 from datetime import datetime
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -49,6 +50,53 @@ JSON_OUTPUT_DEFAULT = DATA_DIR / "workana_jobs.json"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def normalize_url(url: str) -> str:
+    """Remove tracking parameters and normalize URL for deduplication."""
+    if not url:
+        return ""
+    
+    try:
+        parsed = urlparse(url)
+        
+        # Remove common tracking parameters
+        query_params = parse_qs(parsed.query)
+        tracking_params = ['utm_source', 'utm_medium', 'utm_campaign', 'ref', 'source', 'fbclid']
+        for param in tracking_params:
+            query_params.pop(param, None)
+        
+        # Rebuild URL without tracking params
+        new_query = urlencode(query_params, doseq=True)
+        normalized = urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path.rstrip('/'),  # Remove trailing slash
+            parsed.params,
+            new_query,
+            ''  # Remove fragment
+        ))
+        
+        return normalized
+    except Exception:
+        return url
+
+def extract_job_id(url: str) -> str | None:
+    """Extract job ID/slug from Workana URL."""
+    if not url:
+        return None
+    
+    try:
+        # Example: https://www.workana.com/job/desarrollo-sistema-web-12345
+        parts = url.rstrip('/').split('/')
+        if len(parts) >= 2 and 'job' in parts:
+            job_idx = parts.index('job')
+            if job_idx + 1 < len(parts):
+                return parts[job_idx + 1]
+    except Exception:
+        pass
+    
+    return None
+
 
 def get_headers() -> dict:
     return {"User-Agent": random.choice(USER_AGENT_LIST)}
@@ -204,7 +252,18 @@ def scrape(
 
             for job in page_jobs:
                 job_url = (job.get("url") or "").strip()
-                if not job_url or job_url in seen_urls:
+                if not job_url:
+                    continue
+
+                # Normalize URL for deduplication
+                normalized_url = normalize_url(job_url)
+                job_id = extract_job_id(normalized_url)
+                
+                # Check both normalized URL and job ID for duplicates
+                is_duplicate = normalized_url in seen_urls or (job_id and job_id in seen_urls)
+                
+                if is_duplicate:
+                    console.print(f"[dim]⏭️  Omitiendo duplicado: {job['title'][:60]}...[/dim]")
                     continue
 
                 if max_age_hours is not None:
@@ -214,7 +273,10 @@ def scrape(
                         continue
 
                 new_jobs.append(job)
-                seen_urls.add(job_url)
+                seen_urls.add(normalized_url)
+                if job_id:
+                    seen_urls.add(job_id)
+
 
             all_jobs.extend(new_jobs)
 

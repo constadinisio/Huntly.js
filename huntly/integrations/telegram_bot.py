@@ -1,14 +1,22 @@
 import os
 import asyncio
 import html as html_lib
+import logging
  
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 from telegram.constants import ParseMode
+from telegram.error import Conflict, NetworkError
 
 from ..core.storage import get_job, set_status, set_proposal
 from ..ai.proposal_generator import generar_propuesta
 from ..workana.sender import send_proposal_to_workana
+
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
 def keyboard_send(job_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
@@ -122,6 +130,24 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Error al enviar la propuesta.")
         return
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors in the telegram bot."""
+    error = context.error
+    
+    if isinstance(error, Conflict):
+        logging.error("⚠️ Bot conflict detected - another instance is running!")
+        logging.error("Shutting down this instance gracefully...")
+        # Stop the application
+        await context.application.stop()
+        await context.application.shutdown()
+        return
+    
+    if isinstance(error, NetworkError):
+        logging.warning(f"Network error: {error}. Will retry automatically.")
+        return
+    
+    logging.error(f"Update {update} caused error {error}")
+
 def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -132,6 +158,7 @@ def main():
 
     app = Application.builder().token(token).build()
     app.add_handler(CallbackQueryHandler(on_callback))
+    app.add_error_handler(error_handler)
 
     print("🤖 Bot de Telegram iniciado. Esperando acciones...")
 
